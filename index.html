@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stockfish in the Browser</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+<style>
+  body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px; background: #f4f4f4; }
+  #board { width: 400px; }
+  #status { font-size: 15px; color: #333; }
+  button { padding: 8px 16px; font-size: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<h2>Play Stockfish (runs entirely in your browser)</h2>
+<div id="board"></div>
+<div id="status">Loading engine...</div>
+<button id="newGameBtn">New Game</button>
+
+<script>
+  const game = new Chess();
+  const engine = new Worker("stockfish-18-lite-single.js");
+  const statusEl = document.getElementById("status");
+  let engineReady = false;
+
+  engine.onmessage = function (e) {
+    const line = typeof e.data === "string" ? e.data : e.data.data;
+
+    if (line === "uciok") {
+      engine.postMessage("isready");
+    } else if (line === "readyok") {
+      engineReady = true;
+      statusEl.textContent = "Engine ready. Your move (white).";
+    } else if (line.startsWith("bestmove")) {
+      const move = line.split(" ")[1];
+      if (move && move !== "(none)") {
+        game.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move[4] || "q" });
+        board.position(game.fen());
+      }
+      statusEl.textContent = game.game_over() ? "Game over." : "Your move.";
+    }
+  };
+
+  engine.postMessage("uci");
+
+  function onDrop(source, target) {
+    const move = game.move({ from: source, to: target, promotion: "q" });
+    if (move === null) return "snapback";
+
+    statusEl.textContent = "Engine thinking...";
+    engine.postMessage("position fen " + game.fen());
+    engine.postMessage("go depth 15");
+  }
+
+  const board = Chessboard("board", {
+    draggable: true,
+    position: "start",
+    onDrop: onDrop,
+    pieceTheme: "https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/wikipedia/{piece}.png"
+  });
+
+  document.getElementById("newGameBtn").onclick = function () {
+    game.reset();
+    board.position("start");
+    statusEl.textContent = "New game. Your move (white).";
+  };
+</script>
+
+</body>
+</html>
