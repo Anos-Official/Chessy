@@ -53,6 +53,14 @@
     <option value="normal" selected>Normal</option>
     <option value="high">High</option>
   </select>
+  <label for="thinkSelect">Thinking time:</label>
+  <select id="thinkSelect">
+    <option value="200">Instant (0.2s)</option>
+    <option value="500" selected>Fast (0.5s)</option>
+    <option value="1500">Normal (1.5s)</option>
+    <option value="4000">Strong (4s)</option>
+    <option value="10000">Very Strong (10s)</option>
+  </select>
   <button id="newGameBtn">New Game</button>
 </div>
 
@@ -64,13 +72,14 @@
   const engine = new Worker("stockfish-18-lite-single.js");
   const statusEl = document.getElementById("status");
   const gfxSelect = document.getElementById("gfxSelect");
+  const thinkSelect = document.getElementById("thinkSelect");
   let engineReady = false;
   let board = null;
 
   // Graphics presets: piece set + animation speeds
   const GFX_PRESETS = {
     low: {
-      pieceTheme: "https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/wikipedia/{piece}.png",
+      pieceTheme: "https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/dist/img/chesspieces/wikipedia/{piece}.png",
       moveSpeed: 0,      // instant, no sliding animation
       appearSpeed: 0,
       snapbackSpeed: 0,
@@ -139,9 +148,10 @@
     const move = game.move({ from: source, to: target, promotion: "q" });
     if (move === null) return "snapback";
 
+    const thinkMs = thinkSelect.value;
     statusEl.textContent = "Engine thinking...";
     engine.postMessage("position fen " + game.fen());
-    engine.postMessage("go depth 15");
+    engine.postMessage("go movetime " + thinkMs);
   }
 
   gfxSelect.addEventListener("change", function () {
