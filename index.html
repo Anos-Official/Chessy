@@ -7,6 +7,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+
+<script src="engine.js"></script>
+<script src="modes/normal.js"></script>
+<script src="modes/halffish.js"></script>
+
 <style>
   body {
     font-family: sans-serif;
@@ -20,8 +25,28 @@
   }
   #board { width: 400px; min-height: 400px; }
   #status { font-size: 15px; color: #333; }
-  #controls { display: flex; gap: 12px; align-items: center; }
+  #controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; }
   button, select { padding: 8px 16px; font-size: 14px; cursor: pointer; border-radius: 6px; border: 1px solid #ccc; }
+
+  #startScreen {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: center;
+    background: white;
+    padding: 32px 40px;
+    border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    max-width: 420px;
+  }
+  #startScreen h2 { margin: 0; }
+  .field { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+  .field label { font-size: 13px; font-weight: bold; color: #555; }
+  #modeDescription { font-size: 13px; color: #666; min-height: 32px; }
+  #startBtn { background: #2e7d32; color: white; border: none; font-weight: bold; padding: 10px 24px; }
+  #startBtn:disabled { background: #999; cursor: not-allowed; }
+
+  #gameArea { display: none; flex-direction: column; align-items: center; gap: 16px; }
 
   /* ---- HIGH graphics mode flourishes ---- */
   body.gfx-high {
@@ -44,57 +69,108 @@
 </head>
 <body>
 
-<h2>Play Stockfish (runs entirely in your browser)</h2>
+<!-- ===================== PRE-GAME SCREEN ===================== -->
+<div id="startScreen">
+  <h2>Stockfish in the Browser</h2>
 
-<div id="controls">
-  <label for="gfxSelect">Graphics:</label>
-  <select id="gfxSelect">
-    <option value="low">Low</option>
-    <option value="normal" selected>Normal</option>
-    <option value="high">High</option>
-  </select>
-  <label for="thinkSelect">Thinking time:</label>
-  <select id="thinkSelect">
-    <option value="200">Instant (0.2s)</option>
-    <option value="500" selected>Fast (0.5s)</option>
-    <option value="1500">Normal (1.5s)</option>
-    <option value="4000">Strong (4s)</option>
-    <option value="10000">Very Strong (10s)</option>
-  </select>
-  <button id="newGameBtn">New Game</button>
+  <div class="field">
+    <label for="modeSelect">Game mode</label>
+    <select id="modeSelect"></select>
+    <div id="modeDescription"></div>
+  </div>
+
+  <div class="field">
+    <label for="gfxSelect">Graphics</label>
+    <select id="gfxSelect">
+      <option value="low">Low</option>
+      <option value="normal" selected>Normal</option>
+      <option value="high">High</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="thinkSelect">Thinking time</label>
+    <select id="thinkSelect">
+      <option value="200">Instant (0.2s)</option>
+      <option value="500" selected>Fast (0.5s)</option>
+      <option value="1500">Normal (1.5s)</option>
+      <option value="4000">Strong (4s)</option>
+      <option value="10000">Very Strong (10s)</option>
+    </select>
+  </div>
+
+  <button id="startBtn" disabled>Loading engine...</button>
 </div>
 
-<div id="board"></div>
-<div id="status">Loading engine...</div>
+<!-- ===================== GAME AREA ===================== -->
+<div id="gameArea">
+  <h2 id="gameTitle"></h2>
+  <div id="controls">
+    <button id="newGameBtn">New Game</button>
+    <button id="changeSetupBtn">Change Setup</button>
+  </div>
+  <div id="board"></div>
+  <div id="status"></div>
+</div>
 
 <script>
+  // Registry of available game modes. Add new mode objects here.
+  const MODES = [NormalMode, HalffishMode];
+
   const game = new Chess();
-  const engine = new Worker("stockfish-18-lite-single.js");
-  const statusEl = document.getElementById("status");
+  const engine = new StockfishEngine("stockfish-18-lite-single.js");
+
+  const startScreen = document.getElementById("startScreen");
+  const gameArea = document.getElementById("gameArea");
+  const modeSelect = document.getElementById("modeSelect");
+  const modeDescription = document.getElementById("modeDescription");
   const gfxSelect = document.getElementById("gfxSelect");
   const thinkSelect = document.getElementById("thinkSelect");
-  let engineReady = false;
-  let board = null;
+  const startBtn = document.getElementById("startBtn");
+  const statusEl = document.getElementById("status");
+  const gameTitle = document.getElementById("gameTitle");
 
-  // Graphics presets: piece set + animation speeds
+  let board = null;
+  let currentMode = null;
+
+  // Populate mode dropdown from the registry.
+  MODES.forEach((mode, i) => {
+    const opt = document.createElement("option");
+    opt.value = mode.id;
+    opt.textContent = mode.label;
+    modeSelect.appendChild(opt);
+  });
+
+  function updateModeDescription() {
+    const mode = MODES.find(m => m.id === modeSelect.value);
+    modeDescription.textContent = mode ? mode.description : "";
+  }
+  modeSelect.addEventListener("change", updateModeDescription);
+  updateModeDescription();
+
+  engine.ready().then(() => {
+    startBtn.disabled = false;
+    startBtn.textContent = "Start Game";
+  });
+
   const GFX_PRESETS = {
     low: {
       pieceTheme: "https://cdn.jsdelivr.net/npm/@chrisoakman/chessboardjs@1.0.0/dist/img/chesspieces/wikipedia/{piece}.png",
-      moveSpeed: 0,      // instant, no sliding animation
+      moveSpeed: 0,
       appearSpeed: 0,
       snapbackSpeed: 0,
       snapSpeed: 0
     },
     normal: {
       pieceTheme: "https://lichess1.org/assets/piece/merida/{piece}.svg",
-      moveSpeed: 200,    // smooth sliding
+      moveSpeed: 200,
       appearSpeed: 200,
       snapbackSpeed: 150,
       snapSpeed: 100
     },
     high: {
       pieceTheme: "https://lichess1.org/assets/piece/alpha/{piece}.svg",
-      moveSpeed: 350,    // slower, more dramatic slide
+      moveSpeed: 350,
       appearSpeed: 300,
       snapbackSpeed: 250,
       snapSpeed: 150
@@ -103,18 +179,15 @@
 
   function buildBoard(gfxMode) {
     const preset = GFX_PRESETS[gfxMode];
-    const currentFen = game.fen();
 
     document.body.classList.remove("gfx-low", "gfx-normal", "gfx-high");
     document.body.classList.add("gfx-" + gfxMode);
 
-    if (board) {
-      board.destroy();
-    }
+    if (board) board.destroy();
 
     board = Chessboard("board", {
       draggable: true,
-      position: currentFen,
+      position: game.fen(),
       onDrop: onDrop,
       pieceTheme: preset.pieceTheme,
       moveSpeed: preset.moveSpeed,
@@ -124,48 +197,48 @@
     });
   }
 
-  engine.onmessage = function (e) {
-    const line = typeof e.data === "string" ? e.data : e.data.data;
-
-    if (line === "uciok") {
-      engine.postMessage("isready");
-    } else if (line === "readyok") {
-      engineReady = true;
-      statusEl.textContent = "Engine ready. Your move (white).";
-    } else if (line.startsWith("bestmove")) {
-      const move = line.split(" ")[1];
-      if (move && move !== "(none)") {
-        game.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move[4] || "q" });
-        board.position(game.fen());
-      }
-      statusEl.textContent = game.game_over() ? "Game over." : "Your move.";
-    }
-  };
-
-  engine.postMessage("uci");
-
-  function onDrop(source, target) {
+  async function onDrop(source, target) {
     const move = game.move({ from: source, to: target, promotion: "q" });
     if (move === null) return "snapback";
 
-    const thinkMs = thinkSelect.value;
     statusEl.textContent = "Engine thinking...";
-    engine.postMessage("position fen " + game.fen());
-    engine.postMessage("go movetime " + thinkMs);
+
+    const uciMove = await currentMode.getMove(engine, {
+      fen: game.fen(),
+      movetimeMs: parseInt(thinkSelect.value, 10),
+      legalMoveCount: game.moves().length
+    });
+
+    if (uciMove && uciMove !== "(none)") {
+      game.move({ from: uciMove.slice(0, 2), to: uciMove.slice(2, 4), promotion: uciMove[4] || "q" });
+      board.position(game.fen());
+    }
+
+    statusEl.textContent = game.game_over() ? "Game over." : "Your move.";
   }
 
-  gfxSelect.addEventListener("change", function () {
+  startBtn.addEventListener("click", () => {
+    currentMode = MODES.find(m => m.id === modeSelect.value);
+    gameTitle.textContent = currentMode.label + " mode";
+
+    startScreen.style.display = "none";
+    gameArea.style.display = "flex";
+
+    game.reset();
     buildBoard(gfxSelect.value);
+    statusEl.textContent = "Your move (white).";
   });
 
-  document.getElementById("newGameBtn").onclick = function () {
+  document.getElementById("newGameBtn").addEventListener("click", () => {
     game.reset();
     board.position("start");
     statusEl.textContent = "New game. Your move (white).";
-  };
+  });
 
-  // initial build
-  buildBoard(gfxSelect.value);
+  document.getElementById("changeSetupBtn").addEventListener("click", () => {
+    gameArea.style.display = "none";
+    startScreen.style.display = "flex";
+  });
 </script>
 
 </body>
